@@ -1,4 +1,5 @@
-name: Claude Issues Agent
+# .github/workflows/claude-agent.yml
+name: Claude Code Agent
 
 on:
   # Trigger on new issues
@@ -39,21 +40,30 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
-            Analyze this GitHub issue and classify it appropriately.
+            Analyze and classify GitHub Issue #${{ github.event.issue.number }}
+            
+            **Issue Title:** ${{ github.event.issue.title }}
+            
+            **Issue Body:**
+            ${{ github.event.issue.body }}
+            
+            ---
+            
+            Based on the above issue, classify it and take action:
             
             Available labels:
-            - bug: Something isn't working correctly (crashes, incorrect behavior, etc.)
+            - bug: Something isn't working correctly (crashes, ANRs, incorrect behavior)
             - enhancement: New feature request or improvement
             - question: General question about SDK usage
             - documentation: Documentation improvements needed
             
-            After analyzing:
-            1. Add the appropriate label
-            2. Add a brief comment explaining your classification
-            3. If it's a bug, assess if it's likely fixable automatically
+            Instructions:
+            1. Use the GitHub CLI to add the appropriate label: `gh issue edit ${{ github.event.issue.number }} --add-label "<label>"`
+            2. Add a brief comment explaining your classification using: `gh issue comment ${{ github.event.issue.number }} --body "<comment>"`
+            3. If it's a bug, assess severity (ANR/crash = high, incorrect behavior = medium)
             
             Consider the Mixpanel Android SDK context from CLAUDE.md - this is an analytics SDK
-            that must never crash the host app and prioritizes reliability.
+            that must NEVER crash the host app and prioritizes reliability above all else.
 
   # Job 2: Analyze and fix bugs when 'bug' label is added
   fix-bug:
@@ -75,12 +85,28 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Get Issue Number
+        id: issue
+        run: |
+          if [ "${{ github.event_name }}" == "issue_comment" ]; then
+            echo "number=${{ github.event.issue.number }}" >> $GITHUB_OUTPUT
+          else
+            echo "number=${{ github.event.issue.number }}" >> $GITHUB_OUTPUT
+          fi
+
       - name: Analyze and Fix with Claude
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
-            Analyze this bug report and determine if you can fix it.
+            Analyze and fix GitHub Issue #${{ steps.issue.outputs.number }}
+            
+            First, fetch the issue details:
+            ```bash
+            gh issue view ${{ steps.issue.outputs.number }}
+            ```
+            
+            Then follow these steps:
             
             IMPORTANT - Follow these Mixpanel SDK principles from CLAUDE.md:
             1. NEVER CRASH THE HOST APP - wrap all operations in try-catch
@@ -91,23 +117,29 @@ jobs:
             
             Steps:
             1. Understand the bug from the issue description
-            2. Search the codebase to locate relevant files
-            3. Analyze the root cause
+            2. Search the codebase to locate relevant files in src/main/java/com/mixpanel/android/
+            3. Analyze the root cause (check for threading issues, null safety, resource leaks)
             4. If fixable, implement a minimal fix following the patterns in CLAUDE.md
             5. Run `./gradlew build` to verify the fix compiles
-            6. Create a PR with the fix
+            6. Run `./gradlew lint` to check for issues
+            7. Create a branch and commit your changes
+            8. Create a PR using: `gh pr create --title "fix: <description>" --body "Fixes #${{ steps.issue.outputs.number }}"`
             
-            Code conventions:
-            - Package-private visibility by default
+            Code conventions (from CLAUDE.md):
+            - Package-private visibility by default for internal classes
             - Member variables prefixed with 'm' (e.g., mContext)
-            - Use MPLog for logging, never System.out
-            - Always use application context to prevent leaks
+            - Use MPLog for logging, never System.out or Log.d
+            - Always use application context to prevent memory leaks
             - Cursor cleanup in finally blocks
+            - Synchronized blocks over synchronized methods
             
-            If you cannot fix it automatically, add a comment explaining:
+            If you cannot fix it automatically, add a detailed comment to the issue explaining:
             - What you found during analysis
+            - The root cause (if identified)
             - Why it can't be auto-fixed
             - Suggestions for a human developer
+            
+            Use: `gh issue comment ${{ steps.issue.outputs.number }} --body "<your analysis>"`
           claude_args: |
             --model claude-sonnet-4-5-20250929
             --max-turns 25
@@ -128,8 +160,29 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          # Claude will automatically respond to the @claude mention
-          # using context from CLAUDE.md and AGENTS.md
+          prompt: |
+            Respond to the @claude mention in Issue #${{ github.event.issue.number }}
+            
+            **Comment by @${{ github.event.comment.user.login }}:**
+            ${{ github.event.comment.body }}
+            
+            **Issue Context:**
+            - Title: ${{ github.event.issue.title }}
+            - URL: ${{ github.event.issue.html_url }}
+            
+            First, get the full issue context if needed:
+            ```bash
+            gh issue view ${{ github.event.issue.number }}
+            ```
+            
+            Then respond helpfully to the question or request. Use the codebase context 
+            from CLAUDE.md and AGENTS.md to provide accurate answers about the Mixpanel 
+            Android SDK.
+            
+            Post your response as a comment:
+            ```bash
+            gh issue comment ${{ github.event.issue.number }} --body "<your response>"
+            ```
 
   # Job 4: Review PRs when requested
   review-pr:
@@ -155,17 +208,34 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
-            Review this PR against the Mixpanel Android SDK standards.
+            Review Pull Request #${{ github.event.pull_request.number }}
+            
+            First, get the PR details and diff:
+            ```bash
+            gh pr view ${{ github.event.pull_request.number }}
+            gh pr diff ${{ github.event.pull_request.number }}
+            ```
+            
+            Review against the Mixpanel Android SDK standards from CLAUDE.md and AGENTS.md.
             
             Check for:
-            1. Thread safety issues
-            2. Missing try-catch blocks (never crash host app)
-            3. Proper null checking
-            4. Memory leak potential (Activity context, unclosed resources)
+            1. Thread safety issues (concurrent access, synchronization)
+            2. Missing try-catch blocks (SDK must NEVER crash host app)
+            3. Proper null checking and defensive programming
+            4. Memory leak potential (Activity context usage, unclosed resources)
             5. Code style (m prefix for members, package-private default)
             6. Breaking changes to public API
-            7. Missing defensive programming
+            7. Resource cleanup (Cursors in finally blocks)
+            8. Proper logging with MPLog
             
-            Reference CLAUDE.md and AGENTS.md for the complete coding standards.
+            Also verify:
+            - No external dependencies added
+            - Test coverage for new functionality
+            - JavaDoc for public methods
+            
+            Post your review as a PR comment:
+            ```bash
+            gh pr comment ${{ github.event.pull_request.number }} --body "<your review>"
+            ```
             
             Provide specific, actionable feedback with code examples if needed.
