@@ -162,7 +162,7 @@ jobs:
           claude_args: |
             --dangerously-skip-permissions
             --model claude-sonnet-4-5-20250929
-            --max-turns 25
+            --max-turns 50
 
   # Job 3: Respond to @claude mentions for questions/analysis
   respond-to-mention:
