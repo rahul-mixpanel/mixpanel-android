@@ -4,7 +4,7 @@ name: Claude Code Agent
 on:
   # Trigger on new issues
   issues:
-    types: [opened, labeled]
+    types: [opened]
 
   # Trigger on @claude mentions in comments
   issue_comment:
@@ -25,8 +25,11 @@ jobs:
   classify-issue:
     name: Classify New Issue
     runs-on: ubuntu-latest
+    outputs:
+      is_bug: ${{ steps.check-label.outputs.is_bug }}
+      issue_number: ${{ github.event.issue.number }}
     if: |
-      github.event_name == 'issues' && 
+      github.event_name == 'issues' &&
       github.event.action == 'opened' &&
       !contains(github.event.issue.labels.*.name, 'bug') &&
       !contains(github.event.issue.labels.*.name, 'enhancement') &&
@@ -43,39 +46,51 @@ jobs:
           additional_permissions: "Bash,Edit,Write,GitHubIssues,GitHubPullRequests"
           prompt: |
             Analyze and classify GitHub Issue #${{ github.event.issue.number }}
-            
+
             **Issue Title:** ${{ github.event.issue.title }}
-            
+
             **Issue Body:**
             ${{ github.event.issue.body }}
-            
+
             ---
-            
+
             Based on the above issue, classify it and take action:
-            
+
             Available labels:
             - bug: Something isn't working correctly (crashes, ANRs, incorrect behavior)
             - enhancement: New feature request or improvement
             - question: General question about SDK usage
             - documentation: Documentation improvements needed
-            
+
             Instructions:
             1. Use the GitHub CLI to add the appropriate label: `gh issue edit ${{ github.event.issue.number }} --add-label "<label>"`
             2. Add a brief comment explaining your classification using: `gh issue comment ${{ github.event.issue.number }} --body "<comment>"`
             3. If it's a bug, assess severity (ANR/crash = high, incorrect behavior = medium)
-            
+
             Consider the Mixpanel Android SDK context from CLAUDE.md - this is an analytics SDK
             that must NEVER crash the host app and prioritizes reliability above all else.
           claude_args: |
             --dangerously-skip-permissions
 
-  # Job 2: Analyze and fix bugs when 'bug' label is added
+      - name: Check if labeled as bug
+        id: check-label
+        run: |
+          # Check if the issue now has the bug label
+          LABELS=$(gh issue view ${{ github.event.issue.number }} --json labels -q '.labels[].name')
+          if echo "$LABELS" | grep -q "bug"; then
+            echo "is_bug=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_bug=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # Job 2: Analyze and fix bugs when classified as bug by Job 1
   fix-bug:
     name: Analyze & Fix Bug
     runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'bug') ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude fix'))
+    needs: [classify-issue]
+    if: needs.classify-issue.outputs.is_bug == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,11 +110,7 @@ jobs:
       - name: Get Issue Number
         id: issue
         run: |
-          if [ "${{ github.event_name }}" == "issue_comment" ]; then
-            echo "number=${{ github.event.issue.number }}" >> $GITHUB_OUTPUT
-          else
-            echo "number=${{ github.event.issue.number }}" >> $GITHUB_OUTPUT
-          fi
+          echo "number=${{ needs.classify-issue.outputs.issue_number }}" >> $GITHUB_OUTPUT
 
       - name: Analyze and Fix with Claude
         uses: anthropics/claude-code-action@v1
