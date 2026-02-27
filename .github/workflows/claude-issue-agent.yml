@@ -39,7 +39,9 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
+          # Allow Claude to edit issues and run commands without confirmation
+          allowed_tools: "Bash,Edit,Write,GitHubIssues,GitHubPullRequests"
+          direct_prompt: |
             Analyze and classify GitHub Issue #${{ github.event.issue.number }}
             
             **Issue Title:** ${{ github.event.issue.title }}
@@ -64,6 +66,8 @@ jobs:
             
             Consider the Mixpanel Android SDK context from CLAUDE.md - this is an analytics SDK
             that must NEVER crash the host app and prioritizes reliability above all else.
+          claude_args: |
+            --dangerously-skip-permissions
 
   # Job 2: Analyze and fix bugs when 'bug' label is added
   fix-bug:
@@ -75,6 +79,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Need full history for creating branches
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -98,7 +105,8 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
+          allowed_tools: "Bash,Edit,Write,Read,Grep,Glob,GitHubIssues,GitHubPullRequests"
+          direct_prompt: |
             Analyze and fix GitHub Issue #${{ steps.issue.outputs.number }}
             
             First, fetch the issue details:
@@ -122,7 +130,7 @@ jobs:
             4. If fixable, implement a minimal fix following the patterns in CLAUDE.md
             5. Run `./gradlew build` to verify the fix compiles
             6. Run `./gradlew lint` to check for issues
-            7. Create a branch and commit your changes
+            7. Create a branch, commit your changes, and push
             8. Create a PR using: `gh pr create --title "fix: <description>" --body "Fixes #${{ steps.issue.outputs.number }}"`
             
             Code conventions (from CLAUDE.md):
@@ -141,6 +149,7 @@ jobs:
             
             Use: `gh issue comment ${{ steps.issue.outputs.number }} --body "<your analysis>"`
           claude_args: |
+            --dangerously-skip-permissions
             --model claude-sonnet-4-5-20250929
             --max-turns 25
 
@@ -160,7 +169,8 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
+          allowed_tools: "Bash,Read,Grep,Glob,GitHubIssues"
+          direct_prompt: |
             Respond to the @claude mention in Issue #${{ github.event.issue.number }}
             
             **Comment by @${{ github.event.comment.user.login }}:**
@@ -183,6 +193,8 @@ jobs:
             ```bash
             gh issue comment ${{ github.event.issue.number }} --body "<your response>"
             ```
+          claude_args: |
+            --dangerously-skip-permissions
 
   # Job 4: Review PRs when requested
   review-pr:
@@ -207,7 +219,8 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          prompt: |
+          allowed_tools: "Bash,Read,Grep,Glob,GitHubPullRequests"
+          direct_prompt: |
             Review Pull Request #${{ github.event.pull_request.number }}
             
             First, get the PR details and diff:
@@ -239,3 +252,5 @@ jobs:
             ```
             
             Provide specific, actionable feedback with code examples if needed.
+          claude_args: |
+            --dangerously-skip-permissions
