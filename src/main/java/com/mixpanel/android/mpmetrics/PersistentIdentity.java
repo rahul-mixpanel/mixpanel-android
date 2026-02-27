@@ -6,6 +6,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -407,18 +409,18 @@ import com.mixpanel.android.util.MPLog;
         Integer version = Integer.valueOf(versionCode);
         try {
             if (sPreviousVersionCode == null) {
-                SharedPreferences mixpanelPreferences = mMixpanelPreferences.get();
+                SharedPreferences mixpanelPreferences = mMixpanelPreferences.get(SHARED_PREFS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 sPreviousVersionCode = mixpanelPreferences.getInt("latest_version_code", -1);
                 if (sPreviousVersionCode == -1) {
                     sPreviousVersionCode = version;
-                    SharedPreferences.Editor mixpanelPreferencesEditor = mMixpanelPreferences.get().edit();
+                    SharedPreferences.Editor mixpanelPreferencesEditor = mMixpanelPreferences.get(SHARED_PREFS_TIMEOUT_SECONDS, TimeUnit.SECONDS).edit();
                     mixpanelPreferencesEditor.putInt("latest_version_code", version);
                     writeEdits(mixpanelPreferencesEditor);
                 }
             }
 
             if (sPreviousVersionCode < version) {
-                SharedPreferences.Editor mixpanelPreferencesEditor = mMixpanelPreferences.get().edit();
+                SharedPreferences.Editor mixpanelPreferencesEditor = mMixpanelPreferences.get(SHARED_PREFS_TIMEOUT_SECONDS, TimeUnit.SECONDS).edit();
                 mixpanelPreferencesEditor.putInt("latest_version_code", version);
                 writeEdits(mixpanelPreferencesEditor);
                 return true;
@@ -427,6 +429,8 @@ import com.mixpanel.android.util.MPLog;
             MPLog.e(LOGTAG, "Couldn't write internal Mixpanel shared preferences.", e.getCause());
         } catch (InterruptedException e) {
             MPLog.e(LOGTAG, "Couldn't write internal Mixpanel from shared preferences.", e);
+        } catch (TimeoutException e) {
+            MPLog.e(LOGTAG, "Timeout waiting for SharedPreferences in isNewVersion", e);
         }
 
         return false;
@@ -435,7 +439,7 @@ import com.mixpanel.android.util.MPLog;
     public synchronized boolean isFirstLaunch(boolean dbExists, String token) {
         if (sIsFirstAppLaunch == null) {
             try {
-                SharedPreferences mixpanelPreferences = mMixpanelPreferences.get();
+                SharedPreferences mixpanelPreferences = mMixpanelPreferences.get(SHARED_PREFS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                 boolean hasLaunched = mixpanelPreferences.getBoolean("has_launched_" + token, false);
                 if (hasLaunched) {
                     sIsFirstAppLaunch = false;
@@ -446,6 +450,10 @@ import com.mixpanel.android.util.MPLog;
                     }
                 }
             } catch (ExecutionException | InterruptedException e) {
+                MPLog.e(LOGTAG, "Failed to check first launch status", e);
+                sIsFirstAppLaunch = false;
+            } catch (TimeoutException e) {
+                MPLog.e(LOGTAG, "Timeout waiting for SharedPreferences in isFirstLaunch, defaulting to false", e);
                 sIsFirstAppLaunch = false;
             }
         }
@@ -455,13 +463,15 @@ import com.mixpanel.android.util.MPLog;
 
     public synchronized void setHasLaunched(String token) {
         try {
-            SharedPreferences.Editor mixpanelPreferencesEditor = mMixpanelPreferences.get().edit();
+            SharedPreferences.Editor mixpanelPreferencesEditor = mMixpanelPreferences.get(SHARED_PREFS_TIMEOUT_SECONDS, TimeUnit.SECONDS).edit();
             mixpanelPreferencesEditor.putBoolean("has_launched_" + token, true);
             writeEdits(mixpanelPreferencesEditor);
         } catch (ExecutionException e) {
             MPLog.e(LOGTAG, "Couldn't write internal Mixpanel shared preferences.", e.getCause());
         } catch (InterruptedException e) {
             MPLog.e(LOGTAG, "Couldn't write internal Mixpanel shared preferences.", e);
+        } catch (TimeoutException e) {
+            MPLog.e(LOGTAG, "Timeout waiting for SharedPreferences in setHasLaunched", e);
         }
     }
 
@@ -626,11 +636,13 @@ import com.mixpanel.android.util.MPLog;
     private void readOptOutFlag(String token) {
         SharedPreferences prefs = null;
         try {
-            prefs = mMixpanelPreferences.get();
+            prefs = mMixpanelPreferences.get(SHARED_PREFS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (final ExecutionException e) {
             MPLog.e(LOGTAG, "Cannot read opt out flag from sharedPreferences.", e.getCause());
         } catch (final InterruptedException e) {
             MPLog.e(LOGTAG, "Cannot read opt out flag from sharedPreferences.", e);
+        } catch (final TimeoutException e) {
+            MPLog.e(LOGTAG, "Timeout waiting for SharedPreferences in readOptOutFlag", e);
         }
 
         if (prefs == null) {
@@ -641,7 +653,7 @@ import com.mixpanel.android.util.MPLog;
 
     private void writeOptOutFlag(String token) {
         try {
-            final SharedPreferences prefs = mMixpanelPreferences.get();
+            final SharedPreferences prefs = mMixpanelPreferences.get(SHARED_PREFS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             final SharedPreferences.Editor prefsEditor = prefs.edit();
             prefsEditor.putBoolean("opt_out_" + token, mIsUserOptOut);
             writeEdits(prefsEditor);
@@ -649,12 +661,14 @@ import com.mixpanel.android.util.MPLog;
             MPLog.e(LOGTAG, "Can't write opt-out shared preferences.", e.getCause());
         } catch (final InterruptedException e) {
             MPLog.e(LOGTAG, "Can't write opt-out shared preferences.", e);
+        } catch (final TimeoutException e) {
+            MPLog.e(LOGTAG, "Timeout waiting for SharedPreferences in writeOptOutFlag", e);
         }
     }
 
     protected void removeOptOutFlag(String token) {
         try {
-            final SharedPreferences prefs = mMixpanelPreferences.get();
+            final SharedPreferences prefs = mMixpanelPreferences.get(SHARED_PREFS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             final SharedPreferences.Editor prefsEditor = prefs.edit();
             prefsEditor.remove("opt_out_" + token);
             writeEdits(prefsEditor);
@@ -662,17 +676,21 @@ import com.mixpanel.android.util.MPLog;
             MPLog.e(LOGTAG, "Can't remove opt-out shared preferences.", e.getCause());
         } catch (final InterruptedException e) {
             MPLog.e(LOGTAG, "Can't remove opt-out shared preferences.", e);
+        } catch (final TimeoutException e) {
+            MPLog.e(LOGTAG, "Timeout waiting for SharedPreferences in removeOptOutFlag", e);
         }
     }
 
     protected boolean hasOptOutFlag(String token) {
         try {
-            final SharedPreferences prefs = mMixpanelPreferences.get();
+            final SharedPreferences prefs = mMixpanelPreferences.get(SHARED_PREFS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             return prefs.contains("opt_out_" + token);
         } catch (final ExecutionException e) {
             MPLog.e(LOGTAG, "Can't read opt-out shared preferences.", e.getCause());
         } catch (final InterruptedException e) {
             MPLog.e(LOGTAG, "Can't read opt-out shared preferences.", e);
+        } catch (final TimeoutException e) {
+            MPLog.e(LOGTAG, "Timeout waiting for SharedPreferences in hasOptOutFlag", e);
         }
         return false;
     }
@@ -726,4 +744,7 @@ import com.mixpanel.android.util.MPLog;
     private static boolean sReferrerPrefsDirty = true;
     private static final Object sReferrerPrefsLock = new Object();
     private static final String LOGTAG = "MixpanelAPI.PIdentity";
+
+    // Timeout for SharedPreferences Future.get() calls to prevent ANRs
+    private static final long SHARED_PREFS_TIMEOUT_SECONDS = 5;
 }
