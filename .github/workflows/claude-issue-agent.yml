@@ -1,0 +1,170 @@
+name: Claude Issues Agent
+
+on:
+  # Trigger on new issues
+  issues:
+    types: [opened, labeled]
+
+  # Trigger on @claude mentions in comments
+  issue_comment:
+    types: [created]
+
+  # Trigger on PR review comments mentioning @claude
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  # Job 1: Auto-classify new issues
+  classify-issue:
+    name: Classify New Issue
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'issues' && 
+      github.event.action == 'opened' &&
+      !contains(github.event.issue.labels.*.name, 'bug') &&
+      !contains(github.event.issue.labels.*.name, 'enhancement') &&
+      !contains(github.event.issue.labels.*.name, 'question')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Classify Issue with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Analyze this GitHub issue and classify it appropriately.
+            
+            Available labels:
+            - bug: Something isn't working correctly (crashes, incorrect behavior, etc.)
+            - enhancement: New feature request or improvement
+            - question: General question about SDK usage
+            - documentation: Documentation improvements needed
+            
+            After analyzing:
+            1. Add the appropriate label
+            2. Add a brief comment explaining your classification
+            3. If it's a bug, assess if it's likely fixable automatically
+            
+            Consider the Mixpanel Android SDK context from CLAUDE.md - this is an analytics SDK
+            that must never crash the host app and prioritizes reliability.
+
+  # Job 2: Analyze and fix bugs when 'bug' label is added
+  fix-bug:
+    name: Analyze & Fix Bug
+    runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'bug') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude fix'))
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Analyze and Fix with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Analyze this bug report and determine if you can fix it.
+            
+            IMPORTANT - Follow these Mixpanel SDK principles from CLAUDE.md:
+            1. NEVER CRASH THE HOST APP - wrap all operations in try-catch
+            2. THREAD SAFETY - all public APIs must handle concurrent access
+            3. NO EXTERNAL DEPENDENCIES - use only Android SDK and Java stdlib
+            4. BACKWARDS COMPATIBILITY - never break existing public APIs
+            5. DEFENSIVE PROGRAMMING - check nulls, validate inputs
+            
+            Steps:
+            1. Understand the bug from the issue description
+            2. Search the codebase to locate relevant files
+            3. Analyze the root cause
+            4. If fixable, implement a minimal fix following the patterns in CLAUDE.md
+            5. Run `./gradlew build` to verify the fix compiles
+            6. Create a PR with the fix
+            
+            Code conventions:
+            - Package-private visibility by default
+            - Member variables prefixed with 'm' (e.g., mContext)
+            - Use MPLog for logging, never System.out
+            - Always use application context to prevent leaks
+            - Cursor cleanup in finally blocks
+            
+            If you cannot fix it automatically, add a comment explaining:
+            - What you found during analysis
+            - Why it can't be auto-fixed
+            - Suggestions for a human developer
+          claude_args: |
+            --model claude-sonnet-4-5-20250929
+            --max-turns 25
+
+  # Job 3: Respond to @claude mentions for questions/analysis
+  respond-to-mention:
+    name: Respond to @claude
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'issue_comment' && 
+      contains(github.event.comment.body, '@claude') &&
+      !contains(github.event.comment.body, '@claude fix')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Respond with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Claude will automatically respond to the @claude mention
+          # using context from CLAUDE.md and AGENTS.md
+
+  # Job 4: Review PRs when requested
+  review-pr:
+    name: Review PR
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'pull_request_review_comment' && 
+      contains(github.event.comment.body, '@claude review')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Review with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review this PR against the Mixpanel Android SDK standards.
+            
+            Check for:
+            1. Thread safety issues
+            2. Missing try-catch blocks (never crash host app)
+            3. Proper null checking
+            4. Memory leak potential (Activity context, unclosed resources)
+            5. Code style (m prefix for members, package-private default)
+            6. Breaking changes to public API
+            7. Missing defensive programming
+            
+            Reference CLAUDE.md and AGENTS.md for the complete coding standards.
+            
+            Provide specific, actionable feedback with code examples if needed.
