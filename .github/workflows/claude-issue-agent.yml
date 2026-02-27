@@ -40,8 +40,8 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # Allow Claude to edit issues and run commands without confirmation
-          allowed_tools: "Bash,Edit,Write,GitHubIssues,GitHubPullRequests"
-          direct_prompt: |
+          additional_permissions: "Bash,Edit,Write,GitHubIssues,GitHubPullRequests"
+          prompt: |
             Analyze and classify GitHub Issue #${{ github.event.issue.number }}
             
             **Issue Title:** ${{ github.event.issue.title }}
@@ -105,8 +105,8 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          allowed_tools: "Bash,Edit,Write,Read,Grep,Glob,GitHubIssues,GitHubPullRequests"
-          direct_prompt: |
+          additional_permissions: "Bash,Edit,Write,Read,Grep,Glob,GitHubIssues,GitHubPullRequests"
+          prompt: |
             Analyze and fix GitHub Issue #${{ steps.issue.outputs.number }}
             
             First, fetch the issue details:
@@ -169,8 +169,8 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          allowed_tools: "Bash,Read,Grep,Glob,GitHubIssues"
-          direct_prompt: |
+          additional_permissions: "Bash,Read,Grep,Glob,GitHubIssues"
+          prompt: |
             Respond to the @claude mention in Issue #${{ github.event.issue.number }}
             
             **Comment by @${{ github.event.comment.user.login }}:**
@@ -219,8 +219,8 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          allowed_tools: "Bash,Read,Grep,Glob,GitHubPullRequests"
-          direct_prompt: |
+          additional_permissions: "Bash,Read,Grep,Glob,GitHubPullRequests"
+          prompt: |
             Review Pull Request #${{ github.event.pull_request.number }}
             
             First, get the PR details and diff:
